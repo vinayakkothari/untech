@@ -1,0 +1,84 @@
+const express = require('express');
+const bodyParser = require('body-parser');
+const mongoose = require('mongoose');
+const dotenv = require('dotenv');
+const twilio = require('twilio');
+
+dotenv.config();
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.use(bodyParser.json());
+
+// Connect to MongoDB
+mongoose.connect(process.env.MONGODB_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true
+}).then(() => console.log('MongoDB connected'))
+  .catch(err => console.error(err));
+
+// Define schema and model for OTP collection
+const otpSchema = new mongoose.Schema({
+  mobileNumber: String,
+  otp: String
+});
+
+const OTP = mongoose.model('OTP', otpSchema);
+
+// Initialize Twilio client
+const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+
+// Generate OTP
+function generateOTP() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+// Send OTP to mobile number via Twilio
+function sendOTP(mobileNumber, otp) {
+  return twilioClient.messages.create({
+    body: `Your OTP for verification is: ${otp}`,
+    from: process.env.TWILIO_PHONE_NUMBER,
+    to: mobileNumber
+  });
+}
+
+// Send OTP to mobile number
+app.post('/sendotp', async (req, res) => {
+  const { mobileNumber } = req.body;
+  const otp = generateOTP();
+  try {
+    // Save OTP to database
+    await OTP.create({ mobileNumber, otp });
+    // Send OTP via Twilio
+    await sendOTP(mobileNumber, otp);
+    console.log(`OTP sent to ${mobileNumber}: ${otp}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.json({ success: false });
+  }
+});
+
+// Verify OTP
+app.post('/verifyotp', async (req, res) => {
+  const { otp, mobileNumber } = req.body;
+  try {
+    // Find the OTP in the database
+    const otpRecord = await OTP.findOne({ mobileNumber, otp });
+    if (otpRecord) {
+      console.log("OTP verification successful");
+      res.json({ success: true });
+    } else {
+      console.log("Invalid OTP");
+      res.json({ success: false });
+    }
+  } catch (err) {
+    console.error(err);
+    res.json({ success: false });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`Server is running on http://localhost:${PORT}`);
+});
